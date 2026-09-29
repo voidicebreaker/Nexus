@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lacaille Relay</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bone:#d9d3c5;--ink:#0c0b09;--amb:#ff9a3c;--amb2:#c06a24;--dim:#4a2f18;--red:#e5412a;--ice:#cfe3ea}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bone);color:var(--amb);font-family:"IBM Plex Mono",ui-monospace,monospace}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+#tv{position:relative;width:min(1180px,100%);background:var(--ink);padding:14px;box-shadow:0 30px 80px #0004;
+  display:grid;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;gap:10px;
+  height:min(760px,calc(100vh - 32px));overflow:hidden}
+.box{border:1px solid var(--amb2);border-radius:4px;padding:8px 10px;position:relative}
+.lbl{font-size:10px;letter-spacing:.12em;color:var(--amb2);text-transform:uppercase}
+header{grid-column:1/-1;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.pill{border:1px solid var(--amb);border-radius:99px;padding:2px 12px;font-size:12px}
+#clock{font-size:22px;font-weight:600;letter-spacing:.08em}
+#ext{margin-left:auto;text-align:right}
+#extv{font-size:26px;font-weight:600}
+#extk{font-size:11px;color:var(--amb2)}
+#mapbox{padding:0;overflow:hidden;min-height:260px}
+#map{width:100%;height:100%;display:block;cursor:crosshair}
+aside{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto}
+.row{display:flex;align-items:center;gap:6px;margin:5px 0;font-size:12px}
+.row span.n{width:52px}
+.bars{display:flex;gap:2px;flex:1}
+.bars i{flex:1;height:14px;border:1px solid var(--amb2)}
+.bars i.on{background:var(--amb)}
+.bars i.dead{border-color:#2a1a0e;background:repeating-linear-gradient(45deg,#1a120a 0 2px,#000 2px 4px)}
+button{font:inherit;background:none;color:var(--amb);border:1px solid var(--amb);border-radius:3px;cursor:pointer;padding:2px 8px}
+button:hover{background:var(--amb);color:var(--ink)}
+#intv{font-size:24px;font-weight:600}
+.crew{border:1px solid var(--dim);padding:5px 7px;margin:5px 0;font-size:12px;cursor:pointer;border-radius:3px}
+.crew.sel{border-color:var(--amb);background:#1b1108}
+.crew.lost{color:var(--dim)}
+.crew .tl{font-size:11px;color:var(--amb2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+footer{grid-column:1/-1;height:118px;overflow:hidden;font-size:12px;line-height:1.45}
+footer p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+footer p.hot{color:var(--red)}
+footer p.old{color:var(--amb2)}
+.modal{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#000b;z-index:5}
+.modal.on{display:flex}
+.card{border:1px solid var(--amb);background:var(--ink);padding:20px 24px;max-width:520px;margin:16px}
+.card h2{margin:0 0 8px;font-size:18px;letter-spacing:.1em}
+.card p{font-size:13px;line-height:1.55;color:#f3c08e}
+.card .btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.card.red{border-color:var(--red)} .card.red h2{color:var(--red)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--red);vertical-align:middle;margin-right:6px}
+#frost{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
+#scan{position:absolute;inset:0;pointer-events:none;z-index:6;
+  background:repeating-linear-gradient(0deg,#0000 0 2px,#0003 2px 3px),radial-gradient(ellipse at center,#0000 60%,#0007 100%)}
+.blink{animation:b 1s steps(2) infinite}@keyframes b{50%{opacity:.25}}
+kbd{border:1px solid var(--amb2);padding:0 4px;border-radius:2px;font-size:11px}
+@media (max-width:760px){
+  #tv{grid-template-columns:1fr;grid-template-rows:auto 330px auto auto;height:auto;overflow:visible}
+  body{align-items:flex-start;padding:16px}
+  #clock{font-size:18px}#extv{font-size:20px}
+  footer{height:150px}
+}
+</style>
+</head>
+<body>
+<div id="tv">
+  <header>
+    <span class="pill">REDS Explorer Mk.2</span><span class="pill">RCS: Lacaille Relay 9</span>
+    <div><div class="lbl">Shift clock</div><div id="clock">00:00</div></div>
+    <div><div class="lbl">Cores recovered</div><div id="cores" style="font-size:18px">0 / 3</div></div>
+    <div id="ext"><div class="lbl">Exterior</div><div id="extv">-58.0 °C</div><div id="extk">215.2 K</div></div>
+  </header>
+  <div id="mapbox" class="box"><canvas id="map"></canvas></div>
+  <aside>
+    <div class="box">
+      <div class="lbl">Reactor allocation <span id="avail"></span></div>
+      <div class="row"><span class="n">HEAT</span><button data-a="heat" data-d="-1">−</button><div class="bars" id="b-heat"></div><button data-a="heat" data-d="1">+</button></div>
+      <div class="row"><span class="n">ARRAY</span><button data-a="arr" data-d="-1">−</button><div class="bars" id="b-arr"></div><button data-a="arr" data-d="1">+</button></div>
+      <div class="row"><span class="n">COMMS</span><button data-a="com" data-d="-1">−</button><div class="bars" id="b-com"></div><button data-a="com" data-d="1">+</button></div>
+    </div>
+    <div class="box">
+      <div class="lbl">Interior / hab ring</div>
+      <div id="intv">16.0 °C</div>
+      <div id="intn" class="lbl" style="color:var(--amb)"></div>
+    </div>
+    <div class="box" style="flex:1">
+      <div class="lbl">Survey crews <span style="float:right"><button id="recall" style="font-size:10px">RECALL</button></span></div>
+      <div id="crews"></div>
+      <div class="lbl" style="margin-top:6px">Select crew <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> · click map to send · <kbd>R</kbd> recall</div>
+    </div>
+  </aside>
+  <footer class="box" id="log"></footer>
+
+  <canvas id="frost"></canvas>
+
+  <div class="modal" id="door"><div class="card red">
+    <h2><span class="dot blink"></span>AIRLOCK 1 — ENTRY REQUEST</h2>
+    <p id="doortxt"></p>
+    <div class="btns"><button id="open">CYCLE AIRLOCK</button><button id="seal">KEEP SEALED</button></div>
+  </div></div>
+
+  <div class="modal on" id="title"><div class="card">
+    <h2>LACAILLE RELAY 9</h2>
+    <p>Night shift. Sub-polar survey plateau, 71°S. Year 2061.</p>
+    <p>Three crews are out recovering data cores from the old array. You need <b>3 cores</b> to transmit when the shift ends at <b>06:00</b>.</p>
+    <p>The reactor gives you 10 units. Split them between <b>HEAT</b> (keeps the station alive), <b>ARRAY</b> (how far you can see) and <b>COMMS</b> (how clearly your crews come through).</p>
+    <p>The cold has been getting worse every night. Weather doesn't explain it anymore. Crews can only come inside if you cycle the airlock. <b>Check the map before you open it.</b></p>
+    <div class="btns"><button id="start">BEGIN SHIFT ▸</button></div>
+  </div></div>
+
+  <div class="modal" id="end"><div class="card" id="endcard">
+    <h2 id="endh"></h2><p id="endp"></p>
+    <div class="btns"><button onclick="location.reload()">NEW SHIFT</button></div>
+  </div></div>
+  <div id="scan"></div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const CX=500,CY=500, SHIFT=360, MINPERSEC=0.75; // 8 real minutes per shift
+const rnd=(a,b)=>a+Math.random()*(b-a), clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+let S, last=0;
+
+function init(){
+  const names=['ANSEL','BRODSKY','OKONJO'];
+  S={t:0,ext:-58,int:16,alloc:{heat:6,arr:2,com:2},cores:0,over:false,sel:0,
+    crews:names.map((n,i)=>({name:n,x:CX,y:CY,tx:CX,ty:CY,temp:37,state:'home',msgT:rnd(8,20),dwell:0,atDoor:false})),
+    sites:[],fronts:[],log:[],door:null,doorQ:[],nextFake:rnd(110,150),frontT:30,flash:0,snow:[]};
+  const labels=['WEATHER MAST 3','BURIED TRANSIT CAR','ARRAY PYLON 7','SURVEY TENT','CORE VAULT B','PUMP HOUSE'];
+  for(let i=0;i<6;i++){const a=i/6*Math.PI*2+rnd(-.3,.3),r=rnd(230,440);
+    S.sites.push({x:CX+Math.cos(a)*r,y:CY+Math.sin(a)*r,name:labels[i],done:false});}
+  for(let i=0;i<140;i++)S.snow.push({x:Math.random(),y:Math.random(),z:rnd(.3,1)});
+}
+
+/* ---------- time & climate ---------- */
+const clockMin=()=>S.t*MINPERSEC;
+function fmtClock(m){m=Math.min(m,SHIFT);return String(Math.floor(m/60)).padStart(2,'0')+':'+String(Math.floor(m%60)).padStart(2,'0')}
+function avail(){return S.int<-8?6:S.int<0?8:10}
+function extTarget(){
+  const m=clockMin();
+  let e=-58-m/SHIFT*38;
+  for(const f of S.fronts) if(Math.hypot(f.x-CX,f.y-CY)<f.r) e-=28;
+  if(m>285) e-=Math.pow((m-285)/75,2)*205;       // "the stillness": falls through absolute zero
+  return e;
+}
+function inFront(p){return S.fronts.some(f=>Math.hypot(f.x-p.x,f.y-p.y)<f.r)}
+function commsQ(){return clamp(S.alloc.com/4,0,1)}
+function commsRange(){return 120+S.alloc.com*85}
+function scanR(){return 70+S.alloc.arr*55}
+
+/* ---------- log & text ---------- */
+function log(s,hot){S.log.unshift({t:fmtClock(clockMin()),s,hot});S.log.length=Math.min(S.log.length,14);renderLog();if(hot)beep(220,.15);}
+function garble(s,q){const g='░▒▓#/\\?.';return s.replace(/[^ ]/g,c=>Math.random()>q?g[Math.random()*g.length|0]:c)}
+const CHAT=[
+ ['Visibility nil. Following the rope line.','Wind is steady from the south.','Snow is dry as sand out here.','Suit heaters holding. Moving on.'],
+ ['The snow isn\'t falling. It\'s just hanging there.','Thermometer reads lower in the shade. There\'s no sun.','My breath freezes before it leaves the visor.','Something walked here. Barefoot prints.'],
+ ['Station, your lights are on the wrong side of us.','I heard Ansel on channel two. Ansel isn\'t on channel two.','It\'s quiet. The wind stopped. Why did the wind stop.','The cold is coming from the ground. Like it\'s breathing out.'],
+ ['Everything is so still. I don\'t feel cold anymore.','There\'s someone standing at the pylon. Tall. Not moving.','Station, did you send a fourth crew?','Can you see me? I can see you. I can see you from here.']];
+function chatter(c){
+  const m=clockMin(),tier=Math.min(3,Math.floor(m/95)+(Math.random()<.2?1:0));
+  const L=CHAT[Math.min(3,tier)];let s=L[Math.random()*L.length|0];
+  let q=commsQ()*(inFront(c)?.55:1); if(dist(c,{x:CX,y:CY})>commsRange())return;
+  log(c.name+': "'+garble(s,.35+q*.65)+'"');
+}
+
+/* ---------- airlock ---------- */
+function requestDoor(d){ if(S.door){ if(!S.doorQ.some(x=>x.crew===d.crew&&x.fake===d.fake))S.doorQ.push(d); return;} S.door=d; d.age=0; showDoor(); knock(); }
+function showDoor(){
+  const d=S.door,c=S.crews[d.crew];
+  const body=d.fake?'37.0 °C · HR — · RESP —':`${c.temp.toFixed(1)} °C · HR ${Math.round(40+c.temp)} · RESP ${Math.round(c.temp/3)}`;
+  $('doortxt').innerHTML=`Transponder: <b>${c.name}</b><br>Suit telemetry: ${body}<br><br>Voice on intercom: <i>"${d.fake?pick(['It\'s me. Open up. It\'s so cold.','Please. I made it back. Open the door.','I left the others. They\'re fine. Let me in.','You know my voice. Open it.']):pick(['Station, we\'re at the lock. Cycle us in.','Open up, I can\'t feel my hands.','We\'re back. Please be quick.'])}"</i>`;
+  $('door').classList.add('on');
+}
+const pick=a=>a[Math.random()*a.length|0];
+function closeDoor(){ $('door').classList.remove('on'); S.door=null; if(S.doorQ.length)setTimeout(()=>{if(!S.over&&S.doorQ.length)requestDoor(S.doorQ.shift())},600); }
+$('open').onclick=()=>{const d=S.door;if(!d)return;const c=S.crews[d.crew];
+  if(d.fake){S.int-=22;S.flash=1;log('AIRLOCK CYCLED. Chamber is empty. Frost on the INSIDE of the inner glass.',1);
+    log('Hab ring temperature collapsing. Something came in with the air.',1);thud(.6);}
+  else{S.int-=3;c.state='home';c.atDoor=false;c.x=CX;c.y=CY;log(c.name+' is inside. Rewarming.');}
+  closeDoor();};
+$('seal').onclick=()=>{const d=S.door;if(!d)return;const c=S.crews[d.crew];
+  if(d.fake)log('You keep it sealed. The knocking continues for a long time, then stops. Nothing on the external camera.');
+  else log(c.name+' is left outside at the lock. Suit temp falling.',1);
+  closeDoor(); if(!d.fake)setTimeout(()=>{if(!S.over&&c.atDoor&&c.state!=='lost')requestDoor({crew:d.crew,fake:false})},9000);};
+
+/* ---------- input ---------- */
+document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>adj(b.dataset.a,+b.dataset.d));
+function adj(k,d){const a=S.alloc,sum=a.heat+a.arr+a.com;if(d>0&&sum>=avail())return;a[k]=clamp(a[k]+d,0,10);click();renderPanel();}
+$('recall').onclick=recall;
+function recall(){const c=S.crews[S.sel];if(c.state!=='field')return;c.tx=CX;c.ty=CY;log('Recall issued: '+c.name+'.');click();}
+addEventListener('keydown',e=>{if(!S||S.over)return;if('123'.includes(e.key)&&e.key){S.sel=+e.key-1;renderPanel();}if(e.key==='r'||e.key==='R')recall();});
+$('map').addEventListener('click',e=>{
+  if(S.over||!started)return;const r=e.target.getBoundingClientRect(),sc=mapScale();
+  const x=(e.clientX-r.left-sc.ox)/sc.s,y=(e.clientY-r.top-sc.oy)/sc.s;
+  const c=S.crews[S.sel];if(c.state==='lost'||c.atDoor)return;
+  if(c.state==='home'){c.state='field';log(c.name+' leaves through airlock 2.');S.int-=1.5;}
+  c.tx=clamp(x,20,980);c.ty=clamp(y,20,980);click();
+});
+
+/* ---------- simulation ---------- */
+let started=false;
+function step(dt){
+  S.t+=dt; const m=clockMin();
+  // climate
+  S.ext+=(extTarget()-S.ext)*Math.min(1,dt*.4);
+  // reactor under-supply trims allocation
+  const a=S.alloc;while(a.heat+a.arr+a.com>avail()){if(a.arr>0)a.arr--;else if(a.com>0)a.com--;else a.heat--;renderPanel();}
+  const target=S.ext+a.heat*13.5;
+  S.int+=clamp((target-S.int)*.03,-.35,.4)*dt;
+  S.flash=Math.max(0,S.flash-dt*.5);
+  // fronts
+  S.frontT-=dt;if(S.frontT<=0){S.frontT=rnd(28,50)*(m>200?.7:1);
+    const a0=rnd(0,Math.PI*2),r=rnd(90,160);
+    S.fronts.push({x:CX+Math.cos(a0)*700,y:CY+Math.sin(a0)*700,vx:-Math.cos(a0+rnd(-.5,.5))*rnd(5,9),vy:-Math.sin(a0+rnd(-.5,.5))*rnd(5,9),r});}
+  S.fronts.forEach(f=>{f.x+=f.vx*dt;f.y+=f.vy*dt;});S.fronts=S.fronts.filter(f=>Math.hypot(f.x-CX,f.y-CY)<900);
+  // crews
+  S.crews.forEach((c,i)=>{
+    if(c.state==='lost')return;
+    const home=c.state==='home';
+    if(home){if(S.int>4)c.temp=Math.min(37,c.temp+.25*dt);else c.temp-=.02*dt;}
+    else{
+      const dx=c.tx-c.x,dy=c.ty-c.y,d=Math.hypot(dx,dy),sp=(c.temp<32?5:8)*(inFront(c)?.6:1);
+      if(d>2){c.x+=dx/d*Math.min(d,sp*dt);c.y+=dy/d*Math.min(d,sp*dt);}
+      let cool=Math.max(0,-S.ext-30)*.0012*(inFront(c)?3:1)*(c.atDoor?1.6:1);
+      c.temp-=Math.min(cool,.4)*dt;
+      if(c.tx===CX&&c.ty===CY&&d<3&&!c.atDoor){c.atDoor=true;requestDoor({crew:i,fake:false});}
+      S.sites.forEach(s=>{if(!s.done&&dist(c,s)<16){c.dwell+=dt;if(c.dwell>6){s.done=true;c.dwell=0;S.cores++;log(c.name+' recovered data core from '+s.name+'.');beep(660,.1);}}});
+      c.msgT-=dt;if(c.msgT<=0){c.msgT=rnd(14,26);chatter(c);}
+      if(c.temp<34.5&&!c.warned){c.warned=1;log(c.name+': hypothermia onset. Core temp '+c.temp.toFixed(1)+' °C.',1);}
+      if(c.temp<28){c.state='lost';c.atDoor=false;log(c.name+' telemetry flatlined. Last position held.',1);
+        if(S.door&&S.door.crew===i&&!S.door.fake)closeDoor();}
+    }
+  });
+  // the visitor
+  if(m>90){S.nextFake-=dt;if(S.nextFake<=0){S.nextFake=rnd(55,95)*(m>250?.6:1);
+    const cand=S.crews.map((c,i)=>i).filter(i=>S.crews[i].state==='lost'||(S.crews[i].state==='field'&&dist(S.crews[i],{x:CX,y:CY})>140));
+    if(cand.length)requestDoor({crew:pick(cand),fake:true});}}
+  if(S.door){S.door.age+=dt;if(S.door.fake&&S.door.age>30){log('Whatever was at airlock 1 has gone. No tracks in the snow.');closeDoor();}}
+  if(S.door&&S.door.fake&&Math.random()<dt*.5)knock();
+  // stillness notice
+  if(m>285&&!S.still){S.still=1;log('Wind speed 0.0 m/s. Snow suspended. Exterior sensors reporting impossible values.',1);}
+  // end
+  if(S.int<-15)end(false,'STATION FROZEN','The hab ring reaches −15 °C at '+fmtClock(m)+'. The reactor coolant solidifies, and the lights go amber, then out. The last frame from the external camera shows the station from above, though no camera is mounted there.');
+  else if(S.crews.every(c=>c.state==='lost')&&S.cores<3)end(false,'NO CREWS REMAIN','All three transponders are silent. The frequency hums on anyway. Later, voices you know ask to be let in, one at a time.');
+  else if(m>=SHIFT){
+    const alive=S.crews.filter(c=>c.state!=='lost').length;
+    if(S.cores>=3)end(true,'RELAY TRANSMITTED','06:00. The uplink fires into a sky that should be getting light. It isn\'t. '+alive+' of 3 crew are alive. Exterior reading at transmission: '+(S.ext+273.15).toFixed(1)+' K. Something on the Lacaille band answers within four seconds.');
+    else end(false,'SHIFT ENDED — NO TRANSMISSION','06:00 and only '+S.cores+' of 3 cores are in. Relay 9 stays quiet. The sun doesn\'t rise. The next shift never arrives to relieve you.');
+  }
+}
+function end(win,h,p){if(S.over)return;S.over=true;$('door').classList.remove('on');$('endh').textContent=h;$('endp').textContent=p;
+  $('endcard').classList.toggle('red',!win);$('end').classList.add('on');beep(win?440:110,.6);}
+
+/* ---------- rendering: panel ---------- */
+function renderPanel(){
+  const av=avail();$('avail').textContent='· '+(S.alloc.heat+S.alloc.arr+S.alloc.com)+'/'+av+(av<10?' COOLANT FREEZING':'');
+  for(const k of['heat','arr','com']){const b=$('b-'+k);let h='';for(let i=0;i<10;i++)h+=`<i class="${i>=av?'dead':i<S.alloc[k]?'on':''}"></i>`;b.innerHTML=h;}
+  $('crews').innerHTML=S.crews.map((c,i)=>{
+    const d=Math.round(dist(c,{x:CX,y:CY})*12),q=commsQ(),out=c.state==='field'&&d/12>commsRange();
+    let st=c.state==='lost'?'SIGNAL LOST':c.state==='home'?'INSIDE':c.atDoor?'AT AIRLOCK':out?'NO CARRIER':'FIELD · '+d+' m';
+    let t=c.state==='lost'?'—':out?'???':garble(c.temp.toFixed(1)+' °C core',.4+q*.6);
+    return `<div class="crew ${i===S.sel?'sel':''} ${c.state==='lost'?'lost':''}" data-i="${i}"><b>${i+1} ${c.name}</b> <span style="float:right">${st}</span><div class="tl">${t}${c.dwell>0?' · extracting '+Math.round(c.dwell/6*100)+'%':''}</div></div>`}).join('');
+  document.querySelectorAll('.crew').forEach(el=>el.onclick=()=>{S.sel=+el.dataset.i;renderPanel();});
+}
+function renderLog(){$('log').innerHTML=S.log.map((l,i)=>`<p class="${l.hot?'hot':''} ${i>3?'old':''}">[${l.t}] ${l.s}</p>`).join('');}
+function renderHUD(){
+  const m=clockMin();$('clock').textContent=fmtClock(m);$('cores').textContent=S.cores+' / 3';
+  const K=S.ext+273.15;
+  $('extv').textContent=K<0?'ERR °C':S.ext.toFixed(1)+' °C';
+  $('extk').innerHTML=K<0?`<span class="blink" style="color:var(--red)">${K.toFixed(1)} K · BELOW ABSOLUTE ZERO</span>`:K.toFixed(1)+' K';
+  $('intv').textContent=S.int.toFixed(1)+' °C';
+  $('intv').style.color=S.int<0?'var(--red)':'';
+  $('intn').textContent=S.int<-8?'REACTOR COOLANT SLUSHING · 6 UNITS':S.int<0?'PIPES FREEZING · 8 UNITS':S.int<8?'CONDENSATION FREEZING ON CONSOLES':'NOMINAL';
+}
+
+/* ---------- rendering: map ---------- */
+const mc=$('map'),mx=mc.getContext('2d');
+function mapScale(){const w=mc.clientWidth,h=mc.clientHeight,s=Math.min(w,h)/1000;return{s,ox:(w-1000*s)/2,oy:(h-1000*s)/2}}
+function drawMap(){
+  const dpr=devicePixelRatio||1,w=mc.clientWidth,h=mc.clientHeight;
+  if(mc.width!==w*dpr||mc.height!==h*dpr){mc.width=w*dpr;mc.height=h*dpr;}
+  const {s,ox,oy}=mapScale();
+  mx.setTransform(dpr,0,0,dpr,0,0);mx.fillStyle='#0c0b09';mx.fillRect(0,0,w,h);
+  const X=x=>ox+x*s,Y=y=>oy+y*s;
+  const amb='#ff9a3c',dim='#4a2f18',R=scanR();
+  // polar grid
+  mx.strokeStyle=dim;mx.lineWidth=1;
+  for(let r=100;r<=500;r+=100){mx.beginPath();mx.arc(X(CX),Y(CY),r*s,0,7);mx.stroke();}
+  for(let a=0;a<12;a++){const t=a/12*Math.PI*2;mx.beginPath();mx.moveTo(X(CX),Y(CY));mx.lineTo(X(CX+Math.cos(t)*500),Y(CY+Math.sin(t)*500));mx.stroke();}
+  mx.fillStyle=dim;mx.font='10px IBM Plex Mono, monospace';
+  for(let r=100;r<=500;r+=100)mx.fillText(r*12+'m',X(CX+3),Y(CY-r+11));
+  // sweep
+  const sw=(performance.now()/1000*1.2)%(Math.PI*2);
+  const g=mx.createConicGradient?mx.createConicGradient(sw-.5,X(CX),Y(CY)):null;
+  if(g){g.addColorStop(0,'#ff9a3c00');g.addColorStop(.08,'#ff9a3c33');g.addColorStop(.081,'#ff9a3c00');mx.fillStyle=g;mx.beginPath();mx.arc(X(CX),Y(CY),R*s,0,7);mx.fill();}
+  mx.strokeStyle=amb;mx.setLineDash([4,4]);mx.beginPath();mx.arc(X(CX),Y(CY),R*s,0,7);mx.stroke();
+  mx.strokeStyle='#c06a24';mx.beginPath();mx.arc(X(CX),Y(CY),commsRange()*s,0,7);mx.stroke();mx.setLineDash([]);
+  // fronts (cold cells) as hatch, only if within scan
+  for(const f of S.fronts){if(Math.hypot(f.x-CX,f.y-CY)-f.r>R)continue;
+    mx.save();mx.beginPath();mx.arc(X(f.x),Y(f.y),f.r*s,0,7);mx.clip();mx.beginPath();mx.arc(X(CX),Y(CY),R*s,0,7);mx.clip();
+    mx.strokeStyle='#cfe3ea55';for(let i=-f.r*2;i<f.r*2;i+=9){mx.beginPath();mx.moveTo(X(f.x+i-f.r),Y(f.y-f.r));mx.lineTo(X(f.x+i+f.r),Y(f.y+f.r));mx.stroke();}
+    mx.restore();mx.strokeStyle='#cfe3ea99';mx.beginPath();mx.arc(X(f.x),Y(f.y),f.r*s,0,7);mx.stroke();
+    mx.fillStyle='#cfe3ea';if(Math.hypot(f.x-CX,f.y-CY)<R)mx.fillText('COLD CELL '+Math.round(-S.ext-40)+'°',X(f.x-40),Y(f.y));}
+  // sites
+  for(const st of S.sites){if(Math.hypot(st.x-CX,st.y-CY)>R)continue;
+    mx.strokeStyle=st.done?dim:amb;mx.strokeRect(X(st.x)-5,Y(st.y)-5,10,10);if(!st.done){mx.fillStyle=amb;mx.fillRect(X(st.x)-2,Y(st.y)-2,4,4);}
+    mx.fillStyle=st.done?dim:amb;mx.fillText(st.name,X(st.x)+9,Y(st.y)+4);}
+  // station
+  mx.fillStyle='#e5412a';mx.beginPath();mx.arc(X(CX),Y(CY),6,0,7);mx.fill();
+  // crews
+  const q=commsQ();
+  S.crews.forEach((c,i)=>{
+    if(c.state==='home')return;
+    const inRange=dist(c,{x:CX,y:CY})<=commsRange();
+    if(!inRange&&c.state!=='lost')return;
+    const j=(1-q)*14,px=X(c.x+rnd(-j,j)),py=Y(c.y+rnd(-j,j));
+    if(c.state==='field'&&i===S.sel&&!(c.tx===CX&&c.ty===CY)){mx.strokeStyle=amb;mx.setLineDash([2,4]);mx.beginPath();mx.moveTo(px,py);mx.lineTo(X(c.tx),Y(c.ty));mx.stroke();mx.setLineDash([]);}
+    mx.strokeStyle=mx.fillStyle=c.state==='lost'?'#e5412a':amb;
+    if(c.state==='lost'){mx.beginPath();mx.moveTo(px-5,py-5);mx.lineTo(px+5,py+5);mx.moveTo(px+5,py-5);mx.lineTo(px-5,py+5);mx.stroke();}
+    else{mx.beginPath();mx.moveTo(px,py-7);mx.lineTo(px+6,py+5);mx.lineTo(px-6,py+5);mx.closePath();i===S.sel?mx.fill():mx.stroke();}
+    mx.fillText((i+1)+' '+c.name,px+9,py-6);
+  });
+  // snow drift
+  mx.fillStyle='#d9d3c5';const still=clockMin()>285;
+  for(const p of S.snow){if(!still){p.y+=.0006*p.z;p.x+=.0009*p.z;}p.x%=1;p.y%=1;mx.globalAlpha=.25*p.z;mx.fillRect(p.x*w,p.y*h,1.5*p.z,1.5*p.z);}
+  mx.globalAlpha=1;
+  // static
+  const n=Math.floor(w*h/2500*(1-q*.7));mx.fillStyle='#ff9a3c22';for(let i=0;i<n;i++)mx.fillRect(Math.random()*w,Math.random()*h,1,1);
+}
+
+/* ---------- frost overlay ---------- */
+const fc=$('frost'),fx=fc.getContext('2d');let branches=[],frostLvl=-1;
+function buildFrost(){
+  const w=fc.clientWidth,h=fc.clientHeight,dpr=devicePixelRatio||1;fc.width=w*dpr;fc.height=h*dpr;fx.setTransform(dpr,0,0,dpr,0,0);branches=[];
+  const grow=(x,y,a,len,depth,t)=>{if(depth>5||len<3)return;const x2=x+Math.cos(a)*len,y2=y+Math.sin(a)*len;branches.push([x,y,x2,y2,t,depth]);
+    const n=2;for(let k=0;k<n;k++)grow(x2,y2,a+rnd(-.9,.9),len*rnd(.55,.8),depth+1,t+.05+Math.random()*.08);grow(x2,y2,a+rnd(-.2,.2),len*.85,depth+1,t+.04);};
+  for(let i=0;i<70;i++){const side=i%4;let x,y,a;
+    if(side===0){x=rnd(0,w);y=0;a=Math.PI/2}else if(side===1){x=rnd(0,w);y=h;a=-Math.PI/2}else if(side===2){x=0;y=rnd(0,h);a=0}else{x=w;y=rnd(0,h);a=Math.PI}
+    grow(x,y,a+rnd(-.6,.6),rnd(20,55),0,Math.random()*.35);}
+  frostLvl=-1;
+}
+function drawFrost(){
+  const lvl=clamp((12-S.int)/28,0,1)+S.flash*.3;
+  if(Math.abs(lvl-frostLvl)<.004)return;frostLvl=lvl;
+  const w=fc.clientWidth,h=fc.clientHeight;fx.clearRect(0,0,w,h);
+  if(lvl<=0)return;
+  const vg=fx.createRadialGradient(w/2,h/2,Math.min(w,h)*(.6-lvl*.35),w/2,h/2,Math.max(w,h)*.75);
+  vg.addColorStop(0,'#cfe3ea00');vg.addColorStop(1,`rgba(207,227,234,${.35*lvl})`);fx.fillStyle=vg;fx.fillRect(0,0,w,h);
+  fx.strokeStyle='#e8f3f6';fx.lineCap='round';
+  for(const b of branches){if(b[4]>lvl)continue;fx.globalAlpha=clamp((lvl-b[4])*4,0,.75);fx.lineWidth=Math.max(.5,2.2-b[5]*.35);
+    fx.beginPath();fx.moveTo(b[0],b[1]);fx.lineTo(b[2],b[3]);fx.stroke();}
+  fx.globalAlpha=1;
+}
+addEventListener('resize',()=>{buildFrost();});
+
+/* ---------- audio ---------- */
+let AC,windG,windF;
+function audio(){try{AC=new (window.AudioContext||window.webkitAudioContext)();
+  const buf=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate),d=buf.getChannelData(0);let l=0;for(let i=0;i<d.length;i++){l=(l+.02*(Math.random()*2-1))/1.02;d[i]=l*3.5;}
+  const src=AC.createBufferSource();src.buffer=buf;src.loop=true;windF=AC.createBiquadFilter();windF.type='bandpass';windF.frequency.value=420;windF.Q.value=.8;
+  windG=AC.createGain();windG.gain.value=.15;src.connect(windF).connect(windG).connect(AC.destination);src.start();
+  const hum=AC.createOscillator(),hg=AC.createGain();hum.frequency.value=55;hg.gain.value=.018;hum.connect(hg).connect(AC.destination);hum.start();
+}catch(e){}}
+function beep(f,d){if(!AC)return;const o=AC.createOscillator(),g=AC.createGain();o.type='square';o.frequency.value=f;g.gain.setValueAtTime(.04,AC.currentTime);g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+d);o.connect(g).connect(AC.destination);o.start();o.stop(AC.currentTime+d);}
+function click(){beep(1400,.03)}
+function thud(v=.35){if(!AC)return;const o=AC.createOscillator(),g=AC.createGain();o.frequency.setValueAtTime(90,AC.currentTime);o.frequency.exponentialRampToValueAtTime(35,AC.currentTime+.25);
+  g.gain.setValueAtTime(v,AC.currentTime);g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+.3);o.connect(g).connect(AC.destination);o.start();o.stop(AC.currentTime+.3);}
+function knock(){thud();setTimeout(()=>thud(),260);setTimeout(()=>thud(),520);}
+function updateAudio(){if(!windG)return;const still=clockMin()>285;
+  windG.gain.setTargetAtTime(still?0:.12+clamp(-S.ext-58,0,60)/300,AC.currentTime,.8);
+  windF.frequency.setTargetAtTime(300+Math.sin(performance.now()/2300)*140+clamp(-S.ext-58,0,80)*4,AC.currentTime,.5);}
+
+/* ---------- loop ---------- */
+let panelT=0;
+function frame(ts){const dt=Math.min(.1,(ts-last)/1000||0);last=ts;
+  if(started&&!S.over){step(dt);panelT-=dt;if(panelT<=0){panelT=.25;renderPanel();}updateAudio();}
+  renderHUD();drawMap();drawFrost();requestAnimationFrame(frame);}
+$('start').onclick=()=>{$('title').classList.remove('on');started=true;audio();
+  log('Shift begins. Exterior −58 °C. Forecast: clear. (The forecast has said clear for eleven nights.)');
+  log('Three crews standing by in the hab ring. Six core sites flagged on the plateau.');};
+init();renderPanel();buildFrost();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
