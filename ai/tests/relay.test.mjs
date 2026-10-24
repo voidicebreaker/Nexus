@@ -254,6 +254,19 @@ test('standard non-streaming chat supports character prompts and safe generation
   assert.equal(JSON.stringify(sent).includes('do-not-forward'), false);
 });
 
+test('nullable OpenAI settings use defaults instead of rejecting app-generated requests', async t => {
+  const f = await fixture(t);
+  const response = await f.api('/v1/chat/completions', { method: 'POST', body: {
+    ...input, messages: [{ role: 'user', name: null, content: 'hello' }],
+    stream: null, n: null, max_tokens: null, max_completion_tokens: null,
+    temperature: null, top_p: null, seed: null, stop: null, tools: null
+  } });
+  assert.equal(response.status, 200);
+  const sent = f.calls.find(call => call.path === '/v1/chat/completions').body;
+  assert.equal(sent.temperature, 0.7); assert.equal(sent.max_tokens, 2048);
+  assert.equal('top_p' in sent, false); assert.equal('name' in sent.messages[0], false);
+});
+
 test('the API streams chunks before generation finishes on a streaming-capable connection', async t => {
   let pending;
   const f = await fixture(t, async (_req, res) => {

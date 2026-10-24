@@ -76,11 +76,11 @@ function openAIInput(body) {
     throw new HttpError(400, 'Set model to an available LM Studio model identifier.');
   if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 256)
     throw new HttpError(400, 'Use between 1 and 256 text messages. Start a new chat if needed.');
-  if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new HttpError(400, 'stream must be true or false.');
+  if (body.stream != null && typeof body.stream !== 'boolean') throw new HttpError(400, 'stream must be true or false.');
   if ((body.tools?.length || body.functions?.length) || body.tool_choice && body.tool_choice !== 'none' ||
       body.function_call && body.function_call !== 'none')
     throw new HttpError(400, 'This connection supports text chat. Turn off tools and function calling in the app.');
-  if (body.n !== undefined && body.n !== 1) throw new HttpError(400, 'Only one completion per request is supported.');
+  if (body.n != null && body.n !== 1) throw new HttpError(400, 'Only one completion per request is supported.');
   if (body.response_format && body.response_format.type !== 'text')
     throw new HttpError(400, 'Only text response format is supported by this relay.');
   let length = 0;
@@ -98,7 +98,7 @@ function openAIInput(body) {
     length += content.length;
     // Treat developer instructions as system instructions for local chat models.
     const result = { role: message.role === 'developer' ? 'system' : message.role, content };
-    if (message.name !== undefined) {
+    if (message.name != null) {
       if (typeof message.name !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(message.name))
         throw new HttpError(400, 'Message names must use letters, numbers, underscores, or hyphens.');
       result.name = message.name;
@@ -108,7 +108,7 @@ function openAIInput(body) {
   if (length > MAX_TEXT) throw new HttpError(413, 'Message history is too large. Start a new chat.');
   const input = { model: body.model, messages, stream: true, max_tokens: 2048, temperature: 0.7 };
   const limit = body.max_completion_tokens ?? body.max_tokens;
-  if (limit !== undefined) {
+  if (limit != null) {
     if (!Number.isInteger(limit) || limit < 1) throw new HttpError(400, 'max_tokens must be a positive integer.');
     input.max_tokens = Math.min(limit, 2048);
   }
@@ -117,7 +117,7 @@ function openAIInput(body) {
     ['frequency_penalty', -2, 2, false], ['presence_penalty', -2, 2, false],
     ['repeat_penalty', 0, 2, false], ['min_p', 0, 1, false], ['seed', -2147483648, 2147483647, true]
   ]) {
-    if (body[name] === undefined) continue;
+    if (body[name] == null) continue;
     if (!Number.isFinite(body[name]) || body[name] < min || body[name] > max || integer && !Number.isInteger(body[name]))
       throw new HttpError(400, `${name} is outside the supported range.`);
     input[name] = body[name];
