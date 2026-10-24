@@ -1,0 +1,29 @@
+name: Desktop AI checks
+on:
+  push:
+    paths: ['ai/**', 'scripts/package-lm-share.py', '.github/workflows/check-desktop-ai.yml']
+  pull_request:
+    paths: ['ai/**', 'scripts/package-lm-share.py', '.github/workflows/check-desktop-ai.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Parse the Windows bootstrap script
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/ai/desktop/bootstrap.ps1", [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { $parseErrors | Format-List; exit 1 }
+      - name: Check browser JavaScript
+        run: node --check ai/chat.js
+      - name: Test relay authentication, chat, queueing and cancellation on Windows
+        run: node --test ai/tests/relay.test.mjs
+      - name: Verify packaged launcher matches source
+        run: python scripts/package-lm-share.py --check

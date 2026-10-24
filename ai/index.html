@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Private access to the desktop LLM at Icebreaker's Lounge.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://*.trycloudflare.com https://ai.mindovermatter.space https://llm.mindovermatter.space; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Desktop AI · Icebreaker's Lounge</title>
+  <link rel="stylesheet" href="chat.css">
+  <script src="chat.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <a class="brand" href="/">ICEBREAKER'S <span>LOUNGE</span></a>
+      <a class="help-link" href="setup.html">Host setup <span aria-hidden="true">↗</span></a>
+    </header>
+    <main class="workspace">
+      <aside class="connection-panel" aria-labelledby="connection-title">
+        <p class="eyebrow">01 / CONNECTION</p>
+        <h1 id="connection-title">Your desktop.<br>Anywhere.</h1>
+        <p class="intro">A private line to the model running at home.</p>
+        <div class="status-pill"><span class="dot" id="status-dot"></span><span id="connection-status" role="status">Not connected</span></div>
+        <form id="connection-form">
+          <label for="server">Desktop address</label>
+          <input id="server" name="server" type="url" placeholder="https://…trycloudflare.com" required spellcheck="false" autocomplete="off" aria-describedby="server-hint">
+          <p class="field-hint" id="server-hint">From the sharing window on the desktop.</p>
+          <label for="access-key">Private access key</label>
+          <input id="access-key" name="access-key" type="password" placeholder="Paste the key from the host" required autocomplete="off" spellcheck="false" aria-describedby="key-hint">
+          <p class="field-hint" id="key-hint">Kept in this tab only. Never saved to this site.</p>
+          <button class="primary wide" id="connect" type="submit">Connect to desktop <span aria-hidden="true">→</span></button>
+        </form>
+        <div id="model-controls" hidden>
+          <label for="model">Model</label>
+          <select id="model" aria-label="Model"></select>
+          <button class="text-button" id="disconnect" type="button">Disconnect &amp; forget key</button>
+        </div>
+        <p id="connection-message" class="connection-message" role="status" aria-live="polite"></p>
+        <div class="connection-note">
+          <span class="note-mark" aria-hidden="true">⌁</span>
+          <p>The desktop must be awake with LM Studio and its sharing window open. Requests take turns on the GPU.</p>
+        </div>
+        <a class="setup-card" href="setup.html"><strong>Setting up the desktop?</strong><span>Download the Windows launcher <span aria-hidden="true">↗</span></span></a>
+      </aside>
+      <section class="chat-panel" aria-labelledby="chat-title">
+        <header class="chat-header">
+          <div><p class="eyebrow">02 / CONVERSATION</p><h2 id="chat-title">Desktop AI</h2></div>
+          <button class="secondary" id="new-chat" type="button" disabled>New chat</button>
+        </header>
+        <div id="conversation" class="conversation" tabindex="0" aria-label="Conversation">
+          <div id="empty-state" class="empty-state">
+            <div class="signal-art" aria-hidden="true"><i></i><i></i><i></i><span>✳</span></div>
+            <p class="eyebrow">LOCAL MODEL / REMOTE ACCESS</p>
+            <h3>A little compute,<br>wherever you are.</h3>
+            <p>Connect to the desktop on the left.<br>Then make yourself at home.</p>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <p id="reply-status" class="reply-status" role="status" aria-live="polite"></p>
+          <form id="chat-form" class="composer">
+            <label class="sr-only" for="prompt">Message</label>
+            <textarea id="prompt" placeholder="Connect to the desktop to start chatting…" rows="3" maxlength="20000" required disabled></textarea>
+            <div class="composer-bottom"><span id="composer-hint">Enter to send · Shift+Enter for a new line</span><button class="primary send" id="send" type="submit" disabled>Send <span aria-hidden="true">↑</span></button><button class="secondary" id="stop" type="button" hidden>Stop</button></div>
+          </form>
+          <p class="privacy-note">Chats stay in this tab and are sent to the desktop through Cloudflare. Reloading clears the conversation. The host can see requests in LM Studio.</p>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer"><span>MIND OVER MATTER</span><span>HOME COMPUTE / SHARED WITH FRIENDS</span></footer>
+  </div>
+</body>
+</html>

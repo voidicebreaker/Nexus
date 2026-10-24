@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Windows host setup · Desktop AI</title>
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead"><a class="brand" href="/">ICEBREAKER'S <span>LOUNGE</span></a><a class="help-link" href="./">Open chat <span aria-hidden="true">↗</span></a></header>
+    <main class="setup-main">
+      <p class="eyebrow">DESKTOP AI / WINDOWS HOST SETUP</p>
+      <h1>Leave the compute at home.<br>Take the conversation with you.</h1>
+      <p class="lead">Connect LM Studio to your website. Your friends only need a browser, your chat link, and a private access key.</p>
+      <div class="download-row"><a class="primary" href="desktop/LM-Studio-Sharing-Windows.zip" download>Download Windows launcher ↓</a><span>64-bit Windows · no programming needed</span></div>
+      <section class="step"><span class="step-number">01</span><div>
+        <h2>Download and extract</h2>
+        <p>Download the ZIP above. In File Explorer, right-click it and choose <strong>Extract All</strong>. Open the extracted folder. Keep all its files together.</p>
+        <p>The first launch downloads Node.js and Cloudflare Tunnel from their official releases and verifies their SHA256 checksums. It installs them for your Windows account, without administrator access.</p>
+      </div></section>
+      <section class="step"><span class="step-number">02</span><div>
+        <h2>Start LM Studio's local server</h2>
+        <p>Open <strong>LM Studio</strong> and load a <strong>chat model</strong> that works on your desktop. Open <strong>Developer</strong> in the left sidebar, then start the local server.</p>
+        <p>Use port <strong>1234</strong>. Leave <strong>Serve on Local Network</strong> and <strong>Enable CORS</strong> off: the launcher connects locally and handles remote access.</p>
+        <p>If <strong>Require Authentication</strong> is on, create or copy an LM Studio API token in <strong>Manage Tokens</strong>. The launcher will ask for it privately. This token stays on the desktop; do not give it to friends.</p>
+        <p>Leave per-request MCPs and calling servers from <code>mcp.json</code> off for this text-chat setup.</p>
+      </div></section>
+      <section class="step"><span class="step-number">03</span><div>
+        <h2>Double-click Start-LM-Share</h2>
+        <p>In the extracted folder, double-click <strong>Start-LM-Share.cmd</strong>. Give the first launch a few minutes to download its tools. It checks LM Studio, starts the connection, and opens the chat page in your browser.</p>
+        <p>The sharing window displays a <strong>private access key</strong> and a <strong>chat link</strong>. Copy the key into the chat page and click <strong>Connect to desktop</strong>. The desktop address is already filled in when you use that link.</p>
+        <p>Choose your model, then send a test message.</p>
+      </div></section>
+      <section class="step"><span class="step-number">04</span><div>
+        <h2>Give friends the link and key</h2>
+        <p>Share the <strong>chat link</strong> printed in the window and the <strong>private access key</strong> through a private channel. Friends open the link, paste the key, and connect. They do not install anything.</p>
+        <p>Keep the desktop <strong>awake</strong> and leave <strong>LM Studio and the sharing window open</strong> while you are away. Closing the window or pressing <strong>Ctrl+C</strong> stops sharing. Models run one request at a time; up to four more requests can wait.</p>
+      </div></section>
+      <div class="callout"><strong>One thing to remember:</strong> the temporary address changes when you restart the sharing launcher. Use the new chat link each time. The access key stays the same until you run <strong>Reset-Access-Key.cmd</strong>. No domain or router changes are needed.</div>
+      <h3>If something doesn't connect</h3>
+      <details><summary>“LM Studio is not responding”</summary><p>Start the server in LM Studio's Developer view and check that its port is 1234. Load a chat model, then restart the launcher. If you deliberately use another port, it can be set with the <code>MOM_LM_URL</code> environment variable; the standard setup needs no changes.</p></details>
+      <details><summary>“Access key is missing or incorrect”</summary><p>Use the private access key printed in the Windows sharing window, not the homepage password or the LM Studio API token. Copy the whole key without spaces. If it was reset, everyone needs the new key.</p></details>
+      <details><summary>“Cannot reach the desktop” or tunnel unavailable</summary><p>The desktop must be online and awake. Check that the sharing window is still open, and use its latest chat link. Temporary tunnels can briefly take time to become reachable; try Connect again after a few seconds. If the launcher reports a tunnel connection error, check your internet connection and whether your network permits outbound port 7844.</p></details>
+      <details><summary>The model appears but cannot answer</summary><p>Select a text chat model, rather than an embedding model. Load it in LM Studio and check it works there first. A context-window error usually means you should start a New chat or use a shorter prompt. Each reply is limited to 2,048 tokens and ten minutes to keep sharing manageable.</p></details>
+      <details><summary>I want to revoke access</summary><p>Close the sharing window to stop all remote access immediately. To change the private key, close that window and double-click <strong>Reset-Access-Key.cmd</strong>. Give the new key only to the people you want to retain access.</p></details>
+      <details><summary>What is private, and what gets saved?</summary><p>The website never saves the private key or conversation to browser storage. It remembers only the desktop address. Reloading clears your chat. The desktop relay keeps requests and replies temporarily in memory and does not write chat logs. LM Studio may log requests, and the host can see them. Traffic passes through Cloudflare, which terminates HTTPS, so this is not end-to-end encryption between browser and desktop.</p><p>The private key is saved in your Windows account under <code>%LOCALAPPDATA%\MindOverMatterLLM</code>. Everyone with the key can use the shared chat service. Only model listing and text chat are exposed; this does not grant remote desktop, shell, file access, or unrestricted access to LM Studio's model-management API.</p></details>
+      <details><summary>Can I use a permanent address or an API client?</summary><p>This first setup uses a free temporary Cloudflare Quick Tunnel, with no account or DNS changes and no uptime guarantee. A named tunnel can later give it a permanent address such as <code>llm.mindovermatter.space</code>; the chat page already accepts that hostname. The desktop relay uses a small authenticated job API for this chat page. It is not a direct OpenAI-compatible endpoint for coding tools.</p></details>
+      <p class="sources">References: <a href="https://lmstudio.ai/docs/developer/core/server/settings" target="_blank" rel="noreferrer">LM Studio settings</a><a href="https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/" target="_blank" rel="noreferrer">Cloudflare Quick Tunnels</a><a href="https://github.com/voidicebreaker/Nexus/tree/main/ai/desktop" target="_blank" rel="noreferrer">Launcher source</a></p>
+    </main>
+    <footer class="site-footer"><span>MIND OVER MATTER</span><span>HOME COMPUTE / SHARED WITH FRIENDS</span></footer>
+  </div>
+</body>
+</html>
