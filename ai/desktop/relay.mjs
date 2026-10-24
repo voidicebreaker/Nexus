@@ -26,6 +26,14 @@ export function localBase(value = 'http://127.0.0.1:1234') {
   return url.origin;
 }
 
+export function permanentAddress(value) {
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || !['ai.mindovermatter.space', 'llm.mindovermatter.space'].includes(url.hostname) ||
+      url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    throw new Error('Use https://llm.mindovermatter.space or https://ai.mindovermatter.space for the permanent tunnel.');
+  return url.origin;
+}
+
 function matchesKey(header, key) {
   if (typeof header !== 'string' || !header.startsWith('Bearer ')) return false;
   const supplied = Buffer.from(header.slice(7));
@@ -63,8 +71,75 @@ function chatInput(body) {
   return { model: body.model, messages, stream: true, max_tokens: 2048, temperature: 0.7 };
 }
 
+function openAIInput(body) {
+  if (!body || typeof body.model !== 'string' || !body.model || body.model.length > 300)
+    throw new HttpError(400, 'Set model to an available LM Studio model identifier.');
+  if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 256)
+    throw new HttpError(400, 'Use between 1 and 256 text messages. Start a new chat if needed.');
+  if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new HttpError(400, 'stream must be true or false.');
+  if ((body.tools?.length || body.functions?.length) || body.tool_choice && body.tool_choice !== 'none' ||
+      body.function_call && body.function_call !== 'none')
+    throw new HttpError(400, 'This connection supports text chat. Turn off tools and function calling in the app.');
+  if (body.n !== undefined && body.n !== 1) throw new HttpError(400, 'Only one completion per request is supported.');
+  if (body.response_format && body.response_format.type !== 'text')
+    throw new HttpError(400, 'Only text response format is supported by this relay.');
+  let length = 0;
+  const messages = body.messages.map(message => {
+    if (!message || !['system', 'developer', 'user', 'assistant'].includes(message.role))
+      throw new HttpError(400, 'Only system, developer, user, and assistant text messages are supported.');
+    let content = message.content;
+    if (Array.isArray(content)) {
+      if (!content.every(part => part?.type === 'text' && typeof part.text === 'string'))
+        throw new HttpError(400, 'Images, audio, and other attachments are not supported by this connection.');
+      content = content.map(part => part.text).join('\n');
+    }
+    if (typeof content !== 'string' || message.tool_calls?.length || message.function_call)
+      throw new HttpError(400, 'Only text messages are supported. Turn off tools and attachments in the app.');
+    length += content.length;
+    // Treat developer instructions as system instructions for local chat models.
+    const result = { role: message.role === 'developer' ? 'system' : message.role, content };
+    if (message.name !== undefined) {
+      if (typeof message.name !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(message.name))
+        throw new HttpError(400, 'Message names must use letters, numbers, underscores, or hyphens.');
+      result.name = message.name;
+    }
+    return result;
+  });
+  if (length > MAX_TEXT) throw new HttpError(413, 'Message history is too large. Start a new chat.');
+  const input = { model: body.model, messages, stream: true, max_tokens: 2048, temperature: 0.7 };
+  const limit = body.max_completion_tokens ?? body.max_tokens;
+  if (limit !== undefined) {
+    if (!Number.isInteger(limit) || limit < 1) throw new HttpError(400, 'max_tokens must be a positive integer.');
+    input.max_tokens = Math.min(limit, 2048);
+  }
+  for (const [name, min, max, integer] of [
+    ['temperature', 0, 2, false], ['top_p', 0, 1, false], ['top_k', 0, 1000, true],
+    ['frequency_penalty', -2, 2, false], ['presence_penalty', -2, 2, false],
+    ['repeat_penalty', 0, 2, false], ['min_p', 0, 1, false], ['seed', -2147483648, 2147483647, true]
+  ]) {
+    if (body[name] === undefined) continue;
+    if (!Number.isFinite(body[name]) || body[name] < min || body[name] > max || integer && !Number.isInteger(body[name]))
+      throw new HttpError(400, `${name} is outside the supported range.`);
+    input[name] = body[name];
+  }
+  if (body.stop !== undefined && body.stop !== null) {
+    const values = typeof body.stop === 'string' ? [body.stop] : body.stop;
+    if (!Array.isArray(values) || values.length > 32 || !values.every(value => typeof value === 'string' && value.length > 0 && value.length <= 256))
+      throw new HttpError(400, 'stop must be a string or up to 32 short non-empty strings.');
+    input.stop = body.stop;
+  }
+  // Ignore app metadata and never forward arbitrary MCP, network, or file parameters.
+  return input;
+}
+
+function apiError(status, message) {
+  return { error: { message, type: status === 401 ? 'authentication_error' : status === 429 ? 'rate_limit_error' :
+    status >= 500 ? 'server_error' : 'invalid_request_error', param: null, code: String(status) } };
+}
+
 export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
-  generationTimeout = 10 * 60_000, abandonTimeout = 90_000, jobTTL = 15 * 60_000 } = {}) {
+  generationTimeout = 10 * 60_000, abandonTimeout = 90_000, jobTTL = 15 * 60_000,
+  allowApiStreaming = true, apiTimeout = 10 * 60_000 } = {}) {
   if (typeof key !== 'string' || key.length < 32) throw new Error('A random access key of at least 32 characters is required.');
   const base = localBase(lmBase);
   const upstreamHeaders = { 'Content-Type': 'application/json', ...(lmToken ? { Authorization: `Bearer ${lmToken}` } : {}) };
@@ -126,9 +201,15 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
 
   function cancel(job) {
     if (!ACTIVE_STATES.has(job.state)) return;
+    const queued = job.state === 'queued';
     job.state = 'cancelled';
     job.finished = Date.now();
     job.controller.abort();
+    if (queued) {
+      const index = queue.indexOf(job);
+      if (index !== -1) queue.splice(index, 1);
+      delete job.input; job.resolve?.();
+    }
   }
 
   async function run(job) {
@@ -161,13 +242,16 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
         const value = JSON.parse(data);
         if (value.error) throw new Error('LM Studio reported a generation error. Check the desktop.');
         const choice = value.choices?.[0];
+        if (value.usage && typeof value.usage === 'object') job.usage = value.usage;
         if (choice?.finish_reason) {
           complete = true;
+          job.finishReason = choice.finish_reason;
           if (choice.finish_reason === 'length') job.notice = 'Reply reached the 2,048-token limit.';
         }
         const content = choice?.delta?.content;
         if (typeof content === 'string') job.text += content;
         if (job.text.length > MAX_OUTPUT) throw new Error('Reply exceeded the output limit.');
+        job.emit?.(value);
       };
       for await (const bytes of response.body) {
         buffer += decoder.decode(bytes, { stream: true });
@@ -194,6 +278,7 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
       clearTimeout(timeout);
       job.finished = Date.now();
       delete job.input;
+      job.resolve?.();
     }
   }
 
@@ -208,20 +293,46 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
     }
   }
 
+  async function enqueue(input) {
+    const capacity = () => {
+      if (jobs.size >= 100 || [...jobs.values()].filter(job => ACTIVE_STATES.has(job.state)).length >= 5)
+        throw new HttpError(429, 'The desktop is busy. Try again shortly.');
+    };
+    capacity();
+    if (!(await models()).some(model => model.id === input.model))
+      throw new HttpError(400, 'That model is unavailable. Refresh the model list or check the model identifier.');
+    capacity();
+    const job = { id: randomBytes(24).toString('hex'), state: 'queued', text: '', model: input.model,
+      created: Math.floor(Date.now() / 1000), input, controller: new AbortController(), seen: Date.now(), finished: null };
+    job.completion = new Promise(resolve => { job.resolve = resolve; });
+    jobs.set(job.id, job); queue.push(job);
+    return job;
+  }
+
   const server = http.createServer(async (req, res) => {
+    // Match only origin-form paths; malformed absolute request targets must not
+    // throw outside the handler or be interpreted as an upstream proxy URL.
+    const path = String(req.url || '').split('?', 1)[0];
+    const standardAPI = path.startsWith('/v1/');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Vary', 'Origin');
     const reply = (status, data) => {
       if (res.destroyed || res.writableEnded) return;
+      if (res.headersSent) {
+        res.end(`data: ${JSON.stringify(data)}\n\ndata: [DONE]\n\n`); return;
+      }
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(data));
     };
     try {
       const origin = req.headers.origin;
-      if (origin && !ORIGINS.has(origin)) throw new HttpError(403, 'This website is not allowed.');
-      if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      // API clients may run in JanitorAI or a user-hosted frontend. Bearer keys,
+      // not CORS, authorize them; cookies and credentialed CORS are never used.
+      if (!standardAPI && origin && !ORIGINS.has(origin)) throw new HttpError(403, 'This website is not allowed.');
+      if (standardAPI) res.setHeader('Access-Control-Allow-Origin', '*');
+      else if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
       if (req.method === 'OPTIONS') {
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
@@ -231,24 +342,62 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
       rateLimit(req);
       if (!matchesKey(req.headers.authorization, key)) throw new HttpError(401, 'Access key is missing or incorrect.');
       prune();
-      const path = new URL(req.url, 'http://localhost').pathname;
+      if (req.method === 'GET' && path === '/v1/models') {
+        reply(200, { object: 'list', data: (await models()).map(model => ({
+          id: model.id, object: 'model', created: 0, owned_by: 'desktop'
+        })) }); return;
+      }
+      if (req.method === 'POST' && path === '/v1/chat/completions') {
+        const requestDeadline = Date.now() + apiTimeout;
+        if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Send JSON.');
+        const body = await readJson(req);
+        const input = openAIInput(body);
+        if (body.stream && !allowApiStreaming)
+          throw new HttpError(400, 'Turn off streaming in your app for the temporary tunnel, or use Start-Permanent-Tunnel.cmd for streaming.');
+        const job = await enqueue(input);
+        let timedOut = false;
+        const disconnect = () => { if (!res.writableEnded) cancel(job); };
+        res.once('close', disconnect);
+        if (res.destroyed) cancel(job);
+        if (body.stream && !res.destroyed) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no' });
+          res.write(': waiting for the desktop\n\n');
+          job.emit = value => {
+            if (res.destroyed || res.writableEnded) return;
+            const ok = res.write(`data: ${JSON.stringify({ ...value,
+              id: `chatcmpl-${job.id}`, object: 'chat.completion.chunk', created: job.created, model: job.model })}\n\n`);
+            // A client that stops reading must not buffer an unbounded reply.
+            if (!ok && res.writableLength > MAX_OUTPUT * 2) cancel(job);
+          };
+        }
+        const keepAlive = setInterval(() => {
+          job.seen = Date.now();
+          if (body.stream && !res.destroyed && !res.writableEnded) res.write(': desktop working\n\n');
+        }, 15_000);
+        const timer = setTimeout(() => { timedOut = true; cancel(job); }, Math.max(1, requestDeadline - Date.now()));
+        try {
+          void pump();
+          await job.completion;
+          if (res.destroyed || res.writableEnded) return;
+          if (timedOut) { reply(504, apiError(504, 'API request timed out, including queue time. Preload a smaller model, reduce reply length, or try when the GPU is free.')); return; }
+          if (job.state !== 'done') { reply(502, apiError(502, job.error || 'Generation was cancelled.')); return; }
+          if (body.stream) res.end('data: [DONE]\n\n');
+          else reply(200, { id: `chatcmpl-${job.id}`, object: 'chat.completion', created: job.created,
+            model: job.model, choices: [{ index: 0, message: { role: 'assistant', content: job.text },
+              finish_reason: job.finishReason || 'stop' }], ...(job.usage ? { usage: job.usage } : {}) });
+        } finally {
+          clearInterval(keepAlive); clearTimeout(timer); res.off('close', disconnect);
+          delete job.emit; jobs.delete(job.id);
+        }
+        return;
+      }
       if (req.method === 'GET' && path === '/api/models') {
         reply(200, { models: await models(), waiting: queue.filter(job => job.state === 'queued').length }); return;
       }
       if (req.method === 'POST' && path === '/api/chat') {
         if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Send JSON.');
         const input = chatInput(await readJson(req));
-        if (jobs.size >= 100) throw new HttpError(429, 'Session is full. Try again in 15 minutes.');
-        if ([...jobs.values()].filter(job => ACTIVE_STATES.has(job.state)).length >= 5)
-          throw new HttpError(429, 'The desktop is busy with five requests. Try again shortly.');
-        const available = await models();
-        if (!available.some(model => model.id === input.model)) throw new HttpError(400, 'That model is unavailable. Reconnect to refresh the list.');
-        // Recheck after awaiting the shared models request to keep the queue bounded.
-        if ([...jobs.values()].filter(job => ACTIVE_STATES.has(job.state)).length >= 5 || jobs.size >= 100)
-          throw new HttpError(429, 'The desktop is busy. Try again shortly.');
-        const job = { id: randomBytes(24).toString('hex'), state: 'queued', text: '',
-          input, controller: new AbortController(), seen: Date.now(), finished: null };
-        jobs.set(job.id, job); queue.push(job);
+        const job = await enqueue(input);
         reply(202, { id: job.id });
         void pump(); return;
       }
@@ -264,7 +413,9 @@ export function createRelay({ key, lmBase, lmToken = '', fetchImpl = fetch,
       }
       throw new HttpError(404, 'Unknown endpoint.');
     } catch (error) {
-      reply(error.status || 500, { error: error.status ? error.message : 'The desktop relay encountered an error.' });
+      const status = error.status || 500;
+      const message = error.status ? error.message : 'The desktop relay encountered an error.';
+      reply(status, standardAPI ? apiError(status, message) : { error: message });
     }
   });
   server.headersTimeout = 15_000;
@@ -289,7 +440,10 @@ async function main() {
     writeFileSync(keyFile, `${key}\n`, { mode: 0o600 });
   } else key = readFileSync(keyFile, 'utf8').trim();
   if (!/^[A-Za-z0-9_-]{43}$/.test(key)) throw new Error('Access key file is invalid. Run Reset-Access-Key.cmd.');
-  const relay = createRelay({ key, lmBase: process.env.MOM_LM_URL, lmToken: process.env.MOM_LM_TOKEN });
+  const namedToken = process.env.MOM_TUNNEL_TOKEN;
+  const publicURL = namedToken ? permanentAddress(process.env.MOM_PUBLIC_URL) : null;
+  const relay = createRelay({ key, lmBase: process.env.MOM_LM_URL, lmToken: process.env.MOM_LM_TOKEN,
+    allowApiStreaming: Boolean(namedToken), apiTimeout: namedToken ? 10 * 60_000 : 90_000 });
   await new Promise((resolve, reject) => {
     relay.server.once('error', reject);
     relay.server.listen(8787, '127.0.0.1', resolve);
@@ -306,9 +460,13 @@ async function main() {
   const tunnelEnv = { ...process.env };
   // Do not pass the LM token or a pre-existing named-tunnel configuration to cloudflared.
   for (const name of Object.keys(tunnelEnv)) {
-    if (name.startsWith('MOM_') || name.startsWith('TUNNEL_') || name === 'NO_TLS_VERIFY') delete tunnelEnv[name];
+    const upper = name.toUpperCase();
+    if (upper.startsWith('MOM_') || upper.startsWith('TUNNEL_') || upper === 'NO_TLS_VERIFY') delete tunnelEnv[name];
   }
-  const tunnel = spawn(tunnelPath, ['tunnel', '--config', emptyConfig, '--url', 'http://127.0.0.1:8787', '--no-autoupdate', '--metrics', '127.0.0.1:0'],
+  const tunnelArgs = ['tunnel', '--config', emptyConfig, '--no-autoupdate', '--metrics', '127.0.0.1:0'];
+  if (namedToken) { tunnelEnv.TUNNEL_TOKEN = namedToken; tunnelArgs.push('run'); }
+  else tunnelArgs.push('--url', 'http://127.0.0.1:8787');
+  const tunnel = spawn(tunnelPath, tunnelArgs,
     { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: tunnelEnv });
   let announced = false;
   let recent = '';
@@ -322,14 +480,24 @@ async function main() {
   };
   function logs(chunk) {
     recent = (recent + chunk.toString()).slice(-8000);
-    const match = recent.match(/https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com\b/);
+    const match = namedToken ? /Registered tunnel connection/.test(recent) && [publicURL] :
+      recent.match(/https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com\b/);
+    const address = namedToken ? publicURL : match?.[0];
     if (match && !announced) {
       announced = true;
-      const chat = `${SITE}/ai/?server=${encodeURIComponent(match[0])}`;
+      const chat = `${SITE}/ai/?server=${encodeURIComponent(address)}`;
       console.log('YOUR CHAT LINK (opens the website with the server address filled in):\n');
       console.log(chat);
+      console.log('\nAPI BASE URL (SillyTavern / Open WebUI):\n');
+      console.log(`${address}/v1`);
+      console.log('\nJANITORAI PROXY URL:\n');
+      console.log(`${address}/v1/chat/completions`);
+      console.log('\nUse the PRIVATE ACCESS KEY above as the API key in each app.');
+      console.log(namedToken ? 'Streaming is supported through this named tunnel.' :
+        'TEMPORARY TUNNEL: turn OFF streaming in your apps. API requests have a 90-second total limit.');
       console.log('\nShare that link and the private access key with your friends.');
-      console.log('The link changes when you restart. Your access key stays the same.');
+      console.log(namedToken ? 'Your permanent address and access key stay the same between restarts.' :
+        'The link changes when you restart. Your access key stays the same.');
       console.log('Chats pass through Cloudflare; keep this in mind for private prompts.');
       if (process.platform === 'win32') {
         // No key in this URL, browser history, or process arguments.
@@ -344,13 +512,13 @@ async function main() {
   tunnel.on('exit', () => {
     if (shuttingDown) return;
     console.error('Tunnel stopped. Close this window and restart Start-LM-Share.cmd.');
-    if (!announced) console.error(recent.replaceAll(key, '[redacted]'));
+    if (!announced) console.error(recent.replaceAll(key, '[redacted]').replaceAll(namedToken || '\x00', '[redacted]'));
     void shutdown(1);
   });
   const timer = setTimeout(() => {
     if (!announced) {
       console.error('The tunnel is still connecting. Check internet access and outbound port 7844.');
-      console.error(recent.replaceAll(key, '[redacted]'));
+      console.error(recent.replaceAll(key, '[redacted]').replaceAll(namedToken || '\x00', '[redacted]'));
     }
   }, 40_000);
   timer.unref();

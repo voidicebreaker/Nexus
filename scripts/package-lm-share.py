@@ -5,7 +5,7 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 desktop = root / 'ai' / 'desktop'
-files = ['Start-LM-Share.cmd', 'Reset-Access-Key.cmd', 'bootstrap.ps1', 'relay.mjs', 'README.txt']
+files = ['Start-LM-Share.cmd', 'Start-Permanent-Tunnel.cmd', 'Reset-Access-Key.cmd', 'bootstrap.ps1', 'relay.mjs', 'README.txt']
 if '--check' in sys.argv:
     with ZipFile(desktop / 'LM-Studio-Sharing-Windows.zip') as archive:
         expected = {'LM-Studio-Sharing-Windows/' + name for name in files}
@@ -15,7 +15,7 @@ if '--check' in sys.argv:
             saved = archive.read('LM-Studio-Sharing-Windows/' + name).replace(b'\r\n', b'\n')
             source = (desktop / name).read_bytes().replace(b'\r\n', b'\n')
             assert saved == source, f'Regenerate the Windows ZIP after editing {name}'
-    print('Windows ZIP matches all five source files')
+    print('Windows ZIP matches all launcher source files')
     sys.exit(0)
 with ZipFile(desktop / 'LM-Studio-Sharing-Windows.zip', 'w', compression=ZIP_DEFLATED) as archive:
     for name in files:

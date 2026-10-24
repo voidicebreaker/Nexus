@@ -1,5 +1,5 @@
 # Starts a user-local runtime. No admin rights, router changes, or npm packages.
-param([switch]$RotateKey)
+param([switch]$RotateKey, [switch]$PermanentTunnel)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -86,6 +86,30 @@ try {
     }
     if (-not $models.data -or $models.data.Count -eq 0) { throw 'No models are available. Load a chat model in LM Studio, then run this launcher again.' }
     Write-Host 'LM Studio is ready.' -ForegroundColor Green
+    Write-Host 'Available model identifiers (use one in your apps):'
+    foreach ($model in $models.data) { Write-Host "  $($model.id)" }
+    if ($PermanentTunnel) {
+        Write-Host ''
+        Write-Host 'Configure a named Cloudflare Tunnel first; see the Permanent address section in setup.html.'
+        Write-Host 'Its published hostname must point to http://127.0.0.1:8787 on this PC.'
+        $address = Read-Host 'Public address [https://llm.mindovermatter.space]'
+        if (-not $address) { $address = 'https://llm.mindovermatter.space' }
+        $publicUri = [Uri]$address
+        if ($publicUri.Scheme -ne 'https' -or $publicUri.DnsSafeHost -notin @('llm.mindovermatter.space', 'ai.mindovermatter.space') -or
+            -not $publicUri.IsDefaultPort -or $publicUri.AbsolutePath -ne '/' -or $publicUri.Query -or $publicUri.Fragment -or $publicUri.UserInfo) {
+            throw 'Use https://llm.mindovermatter.space or https://ai.mindovermatter.space.'
+        }
+        $env:MOM_PUBLIC_URL = $publicUri.GetLeftPart([UriPartial]::Authority)
+        Write-Host 'Paste only the Cloudflare tunnel token, not the full install command. Typing is hidden.'
+        $secureTunnel = Read-Host 'Cloudflare tunnel token' -AsSecureString
+        $tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureTunnel)
+        try { $env:MOM_TUNNEL_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr).Trim() }
+        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr) }
+        if ($env:MOM_TUNNEL_TOKEN -notmatch '^[a-zA-Z0-9+/_.=-]{20,8000}$') { throw 'That is not a tunnel token. Paste only the token from the Cloudflare connector command.' }
+    } else {
+        Remove-Item Env:\MOM_TUNNEL_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\MOM_PUBLIC_URL -ErrorAction SilentlyContinue
+    }
     $relayFile = Join-Path $PSScriptRoot 'relay.mjs'
     if (-not (Test-Path $relayFile)) { throw 'relay.mjs is missing. Extract the whole ZIP, then run Start-LM-Share.cmd from the extracted folder.' }
     $relayArgs = @($relayFile)
@@ -99,4 +123,5 @@ try {
     exit 1
 } finally {
     Remove-Item Env:\MOM_LM_TOKEN -ErrorAction SilentlyContinue
+    Remove-Item Env:\MOM_TUNNEL_TOKEN -ErrorAction SilentlyContinue
 }

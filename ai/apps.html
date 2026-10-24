@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Connect your apps · Desktop AI</title>
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead"><a class="brand" href="/">ICEBREAKER'S <span>LOUNGE</span></a><a class="help-link" href="./">Open chat <span aria-hidden="true">↗</span></a></header>
+    <main class="setup-main">
+      <p class="eyebrow">DESKTOP AI / APP CONNECTIONS</p>
+      <h1>Your desktop model.<br>Your favourite apps.</h1>
+      <p class="lead">Use the same private access key in SillyTavern, JanitorAI, and Open WebUI. The launcher prints each address you need.</p>
+      <div class="download-row"><a class="primary" href="desktop/LM-Studio-Sharing-Windows.zip" download>Download updated Windows launcher ↓</a><a href="setup.html">First-time host setup</a></div>
+      <div class="callout"><strong>Already downloaded the old launcher?</strong> Close its sharing window, download and extract this updated ZIP, then run <strong>Start-LM-Share.cmd</strong> from the new folder. Your existing private access key is reused from your Windows account. The old launcher does not have these API routes.</div>
+      <section class="step"><span class="step-number">01</span><div>
+        <h2>Find the three values</h2>
+        <p>Start LM Studio and the updated launcher on your desktop. Its window prints:</p>
+        <ul>
+          <li><strong>PRIVATE ACCESS KEY</strong> — paste this in each app's API key field.</li>
+          <li><strong>API BASE URL</strong> — use this in SillyTavern and Open WebUI. It ends in <code>/v1</code>.</li>
+          <li><strong>JANITORAI PROXY URL</strong> — use this in JanitorAI. It ends in <code>/v1/chat/completions</code>.</li>
+        </ul>
+        <p>The launcher also lists the available <strong>model identifiers</strong>. Use the exact identifier of your loaded text-chat model. Do not enter your website's chat-page address as an API URL.</p>
+        <p>The sharing key is different from an LM Studio API token and a Cloudflare tunnel token. Those two host credentials stay on the desktop.</p>
+      </div></section>
+      <div class="callout"><strong>For the temporary tunnel, turn streaming OFF in the app.</strong> This mode returns each completed reply in one response. API requests have a <strong>90-second total limit, including queue time</strong>. Preload your model and try a short reply first. The website's own chat still shows incremental updates through polling. For streaming or a permanent address, see below.</div>
+      <section class="step"><span class="step-number">02</span><div>
+        <h2>SillyTavern</h2>
+        <p>Open <strong>API Connections</strong>. Set API to <strong>Chat Completion</strong>, then choose <strong>Custom (OpenAI-compatible)</strong> as the source.</p>
+        <p><strong>Custom Endpoint:</strong> paste the launcher's <strong>API BASE URL</strong>.<br><strong>Custom API key:</strong> paste the <strong>PRIVATE ACCESS KEY</strong>.<br><strong>Model:</strong> select your LM Studio model from the list, or enter its exact identifier.</p>
+        <p>Do not add <code>/chat/completions</code> to SillyTavern's endpoint. Turn <strong>streaming off</strong> for a temporary tunnel, then use <strong>Test Message</strong>.</p>
+      </div></section>
+      <section class="step"><span class="step-number">03</span><div>
+        <h2>JanitorAI</h2>
+        <p>Inside a character chat, open the menu and <strong>API Settings</strong>. Choose <strong>Proxy</strong> and <strong>Add Configuration</strong>, if available in your account.</p>
+        <p><strong>Configuration name:</strong> My desktop.<br><strong>Proxy URL:</strong> paste the full <strong>JANITORAI PROXY URL</strong>.<br><strong>API key:</strong> paste the <strong>PRIVATE ACCESS KEY</strong>.<br><strong>Model:</strong> enter the exact LM Studio model identifier.</p>
+        <p>Here the URL does include <code>/v1/chat/completions</code>. Save and activate the configuration, refresh the chat, and send a short test message. Turn <strong>streaming off</strong> for a temporary tunnel. If your JanitorAI interface does not offer that switch, use the permanent-tunnel mode below.</p>
+      </div></section>
+      <section class="step"><span class="step-number">04</span><div>
+        <h2>Open WebUI</h2>
+        <p>Open <strong>Settings → Admin → Connections</strong>. Under <strong>Manage OpenAI API Connections</strong>, add a connection.</p>
+        <p><strong>URL:</strong> paste the <strong>API BASE URL</strong>.<br><strong>API key:</strong> paste the <strong>PRIVATE ACCESS KEY</strong>.</p>
+        <p>Verify the connection, save it, and select your model. Open <strong>Chat Controls → Advanced Params</strong> and set <strong>Stream Chat Response</strong> to <strong>Off</strong> for a temporary tunnel. If your account-wide setting overrides it, check <strong>Settings → General → Advanced Parameters</strong> too. Keep tools, attachments, web search, and function calling off for this text-chat connection. Automatic title and follow-up requests also use the shared GPU queue.</p>
+        <p>Use the public tunnel address even if Open WebUI runs in Docker on your laptop; <code>localhost</code> there refers to the laptop or container, not your desktop at home.</p>
+      </div></section>
+      <h3 id="permanent">Optional: permanent address and streaming</h3>
+      <p class="lead">Use this when you want a stable API address, streamed replies, or an app that cannot disable streaming.</p>
+      <div class="callout">This requires a Cloudflare account and the domain's DNS to be managed by Cloudflare. The temporary mode above needs neither. If your DNS is elsewhere, test temporary mode first; do not change nameservers just to follow these instructions.</div>
+      <section class="step"><span class="step-number">A</span><div>
+        <h2>Create a named Cloudflare Tunnel</h2>
+        <p>In your Cloudflare dashboard, create a <strong>Cloudflare Tunnel</strong> using the <strong>cloudflared</strong> connector. Add a published application route with hostname <strong>llm.mindovermatter.space</strong>, service type <strong>HTTP</strong>, and service address <strong>127.0.0.1:8787</strong>. Leave the path blank so both the website chat and the API can reach the relay.</p>
+        <p>The destination is the relay on port <strong>8787</strong>, not LM Studio's port 1234. The relay enforces the private key. A browser-only Cloudflare Access login would prevent these API clients from connecting unless separately configured for them.</p>
+      </div></section>
+      <section class="step"><span class="step-number">B</span><div>
+        <h2>Run the permanent-tunnel launcher</h2>
+        <p>Close any running sharing window. Double-click <strong>Start-Permanent-Tunnel.cmd</strong> in the updated ZIP. When asked for the public address, press Enter to use <strong>https://llm.mindovermatter.space</strong>.</p>
+        <p>Cloudflare's connector setup displays a command containing a <strong>tunnel token</strong>. Paste <strong>only that token</strong> into the launcher's hidden prompt. You do not need to install its Windows service. The token is not saved by this launcher and is never given to friends or entered in chat apps.</p>
+        <p>After the tunnel connects, use the printed addresses and private sharing key in your apps. Streaming is enabled in this mode; the address survives restarts. Use streaming for slow or queued requests: non-streaming requests can still hit a client's or proxy's timeout before the relay's ten-minute deadline. Cloudflare must have the hostname correctly routed before it can be reached.</p>
+      </div></section>
+      <h3>Supported scope</h3>
+      <p class="lead">Text chat and model discovery: <code>GET /v1/models</code> and <code>POST /v1/chat/completions</code>. System prompts, character names, and common sampling controls are supported. Replies are capped at 2,048 tokens; one generation runs at a time, with four waiting slots shared with the website.</p>
+      <p class="lead">Tools, images, audio, embeddings, Responses API, and model-management operations are not exposed. The relay has automated protocol tests; live end-to-end testing in your three apps still requires your desktop and accounts.</p>
+      <p class="sources">References: <a href="https://docs.sillytavern.app/usage/api-connections/openai/#custom-openai-compatible-endpoint" target="_blank" rel="noreferrer">SillyTavern</a><a href="https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/" target="_blank" rel="noreferrer">Open WebUI</a><a href="https://developer.puter.com/tutorials/use-janitor-ai-with-puter/" target="_blank" rel="noreferrer">JanitorAI proxy example from Puter</a><a href="https://developers.cloudflare.com/tunnel/get-started/" target="_blank" rel="noreferrer">Cloudflare Tunnel</a></p>
+    </main>
+    <footer class="site-footer"><span>MIND OVER MATTER</span><span>HOME COMPUTE / SHARED WITH FRIENDS</span></footer>
+  </div>
+</body>
+</html>

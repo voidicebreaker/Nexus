@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createRelay, localBase } from '../desktop/relay.mjs';
+import { createRelay, localBase, permanentAddress } from '../desktop/relay.mjs';
 
 const KEY = 't'.repeat(43);
 const SITE = 'https://mindovermatter.space';
@@ -153,7 +153,7 @@ test('bounds the generation queue and blocks model-management routes', async t =
   });
   for (let i = 0; i < 5; i++) await f.submit();
   assert.equal((await f.api('/api/chat', { method: 'POST', body: input })).status, 429);
-  for (const path of ['/v1/chat/completions', '/api/v1/models/load', '/v1/models', '/files', '/'])
+  for (const path of ['/v1/chat/completions', '/api/v1/models/load', '/files', '/'])
     assert.equal((await f.api(path)).status, 404);
 });
 
@@ -210,4 +210,150 @@ test('split UTF-8 and CRLF events are parsed correctly', async t => {
   const result = await f.untilDone(await f.submit());
   assert.equal(result.state, 'done');
   assert.equal(result.text, '🌍');
+});
+
+test('OpenAI model discovery and authentication work from third-party apps', async t => {
+  const f = await fixture(t);
+  const missing = await f.api('/v1/models', { key: null, origin: 'https://janitorai.com' });
+  assert.equal(missing.status, 401);
+  assert.equal(missing.data.error.type, 'authentication_error');
+  assert.equal(f.calls.length, 0);
+  const preflight = await f.api('/v1/chat/completions', { method: 'OPTIONS', key: null, origin: 'https://janitorai.com' });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+  assert.equal(preflight.headers.get('access-control-allow-credentials'), null);
+  const response = await f.api('/v1/models', { origin: 'http://localhost:8080' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.data, { object: 'list', data: [{ id: 'test-chat', object: 'model', created: 0, owned_by: 'desktop' }] });
+});
+
+test('standard non-streaming chat supports character prompts and safe generation settings', async t => {
+  const f = await fixture(t);
+  const response = await f.api('/v1/chat/completions', { method: 'POST', origin: 'https://janitorai.com', body: {
+    model: 'test-chat', stream: false, messages: [
+      { role: 'system', content: 'Character description' },
+      { role: 'developer', content: 'Reply in character' },
+      { role: 'user', name: 'Player', content: [{ type: 'text', text: 'hello' }] },
+      { role: 'assistant', content: 'A response prefix' }
+    ], max_tokens: 8192, temperature: 1.1, top_p: 0.9, min_p: 0.05, stop: ['END'],
+    user: 'do-not-forward', mcp_servers: ['do-not-forward'], metadata: { secret: 'do-not-forward' }
+  } });
+  assert.equal(response.status, 200);
+  assert.equal(response.data.object, 'chat.completion');
+  assert.equal(response.data.model, 'test-chat');
+  assert.equal(response.data.choices[0].message.content, 'Hello 世界');
+  assert.equal(response.data.choices[0].finish_reason, 'stop');
+  assert.equal(response.data.choices[0].index, 0);
+  const sent = f.calls.find(call => call.path === '/v1/chat/completions').body;
+  assert.equal(sent.messages[0].role, 'system');
+  assert.equal(sent.messages[1].role, 'system');
+  assert.deepEqual(sent.messages[2], { role: 'user', name: 'Player', content: 'hello' });
+  assert.equal(sent.max_tokens, 2048);
+  assert.equal(sent.temperature, 1.1);
+  assert.deepEqual(sent.stop, ['END']);
+  assert.equal(JSON.stringify(sent).includes('do-not-forward'), false);
+});
+
+test('the API streams chunks before generation finishes on a streaming-capable connection', async t => {
+  let pending;
+  const f = await fixture(t, async (_req, res) => {
+    pending = res;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write('data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"first"},"finish_reason":null}]}\n\n');
+  });
+  const response = await fetch(f.address + '/v1/chat/completions', { method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, stream: true }) });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/event-stream/);
+  const reader = response.body.getReader();
+  let text = '';
+  while (!text.includes('first')) { const next = await reader.read(); assert.equal(next.done, false); text += new TextDecoder().decode(next.value); }
+  assert.equal(pending.writableEnded, false);
+  assert.match(text, /chat\.completion\.chunk/);
+  pending.end('data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  while (true) { const next = await reader.read(); if (next.done) break; text += new TextDecoder().decode(next.value); }
+  assert.equal((text.match(/data: \[DONE\]/g) || []).length, 1);
+});
+
+test('the temporary-tunnel mode rejects streaming with actionable standard API errors', async t => {
+  const f = await fixture(t, null, { allowApiStreaming: false });
+  const response = await f.api('/v1/chat/completions', { method: 'POST', body: { ...input, stream: true } });
+  assert.equal(response.status, 400);
+  assert.match(response.data.error.message, /Turn off streaming/);
+  assert.equal(f.calls.length, 0);
+  const working = await f.api('/v1/chat/completions', { method: 'POST', body: { ...input, stream: false } });
+  assert.equal(working.status, 200);
+});
+
+test('website chat and API requests use the same serial GPU queue', async t => {
+  const pending = [];
+  const f = await fixture(t, async (_req, res) => {
+    pending.push(res); res.setHeader('Content-Type', 'text/event-stream');
+    res.write('data: {"choices":[{"index":0,"delta":{"content":"reply"}}]}\n\n');
+  });
+  const first = await f.submit();
+  const apiResponse = await fetch(f.address + '/v1/chat/completions', { method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, stream: true }) });
+  const apiText = apiResponse.text();
+  const last = await f.submit();
+  assert.equal((await f.api(`/api/jobs/${last}`)).data.position, 2);
+  assert.equal(pending.length, 1);
+  pending[0].end('data: [DONE]\n\n'); await f.untilDone(first);
+  for (let i = 0; pending.length < 2 && i < 100; i++) await delay(10);
+  assert.equal(pending.length, 2);
+  assert.equal((await f.api(`/api/jobs/${last}`)).data.state, 'queued');
+  pending[1].end('data: [DONE]\n\n'); assert.match(await apiText, /\[DONE\]/);
+  for (let i = 0; pending.length < 3 && i < 100; i++) await delay(10);
+  assert.equal(pending.length, 3);
+  pending[2].end('data: [DONE]\n\n'); assert.equal((await f.untilDone(last)).state, 'done');
+});
+
+test('disconnecting an API client aborts its generation and releases the shared queue', async t => {
+  let calls = 0;
+  const f = await fixture(t, async (_req, res) => {
+    calls++; res.setHeader('Content-Type', 'text/event-stream');
+    res.write('data: {"choices":[{"index":0,"delta":{"content":"started"}}]}\n\n');
+    if (calls > 1) res.end('data: [DONE]\n\n');
+  });
+  const controller = new AbortController();
+  const response = await fetch(f.address + '/v1/chat/completions', { method: 'POST', signal: controller.signal,
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, stream: true }) });
+  const reader = response.body.getReader(); let text = '';
+  while (!text.includes('started')) { const part = await reader.read(); text += new TextDecoder().decode(part.value); }
+  controller.abort(); await reader.cancel().catch(() => {});
+  const next = await f.submit();
+  assert.equal((await f.untilDone(next)).state, 'done');
+  assert.equal(calls, 2);
+});
+
+test('API deadlines abort a stalled model and return a standard timeout response', async t => {
+  const f = await fixture(t, async (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream'); res.write(': waiting\n\n');
+  }, { apiTimeout: 50 });
+  const response = await f.api('/v1/chat/completions', { method: 'POST', body: input });
+  assert.equal(response.status, 504);
+  assert.equal(response.data.error.type, 'server_error');
+  assert.match(response.data.error.message, /timed out/);
+});
+
+test('the API rejects unsupported tools, attachments, unsafe parameters and model management', async t => {
+  const f = await fixture(t);
+  for (const body of [
+    { ...input, tools: [{ type: 'function', function: { name: 'read_file' } }] },
+    { ...input, messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'file:///secret' } }] }] },
+    { ...input, messages: [{ role: 'tool', content: 'file contents' }] },
+    { ...input, temperature: 9 }, { ...input, max_tokens: -1 }, { ...input, n: 2 },
+    { ...input, response_format: { type: 'json_schema' } }, { ...input, model: 'missing' }
+  ]) {
+    const response = await f.api('/v1/chat/completions', { method: 'POST', body });
+    assert.equal(response.status, 400); assert.equal(typeof response.data.error.message, 'string');
+  }
+  assert.equal((await f.api('/api/v1/models/load', { method: 'POST', body: { model: 'test-chat' } })).status, 404);
+  assert.equal(f.calls.filter(call => call.path === '/v1/chat/completions').length, 0);
+});
+
+test('named-tunnel hostnames are restricted to this site and cannot contain credentials or paths', () => {
+  assert.equal(permanentAddress('https://llm.mindovermatter.space'), 'https://llm.mindovermatter.space');
+  for (const value of ['https://example.com', 'http://llm.mindovermatter.space', 'https://key@llm.mindovermatter.space',
+    'https://llm.mindovermatter.space/v1', 'https://llm.mindovermatter.space?key=secret']) assert.throws(() => permanentAddress(value));
 });

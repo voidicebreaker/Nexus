@@ -12,9 +12,16 @@ MINDOVERMATTER / LM STUDIO SHARING FOR WINDOWS
    in the Windows console. It is hidden while typing and is not saved.
 5. The window prints a PRIVATE ACCESS KEY and YOUR CHAT LINK.
    The browser opens the link. Paste the private key and click Connect.
-6. Give friends the chat link and private access key through a private
+6. For SillyTavern or Open WebUI, use API BASE URL and PRIVATE ACCESS KEY.
+   For JanitorAI's Proxy settings, use JANITORAI PROXY URL and the same key.
+   The launcher prints all three. Use a model identifier printed at startup.
+   TURN OFF STREAMING in apps when using the temporary tunnel. API requests
+   have a 90-second total limit, including queue time. Preload a model first.
+   Text chat only: turn off tools, attachments, and function calling.
+   Full instructions: https://mindovermatter.space/ai/apps.html
+7. Give friends the chat link and private access key through a private
    channel. Keep your desktop awake, LM Studio running, and this window open.
-7. Close the window or press Ctrl+C to stop sharing.
+8. Close the window or press Ctrl+C to stop sharing.
 
 Full illustrated-by-steps setup and troubleshooting:
 https://mindovermatter.space/ai/setup.html
@@ -41,6 +48,24 @@ IMPORTANT
   process. It does not change your system's persistent execution policy.
 - Standard Intel/AMD 64-bit Windows is supported. ARM Windows requires
   Windows' x64 emulation support. 32-bit Windows is not supported.
+
+PERMANENT ADDRESS / STREAMING (OPTIONAL)
+--------------------------------------
+See https://mindovermatter.space/ai/apps.html#permanent first.
+This requires a named Cloudflare Tunnel and DNS on Cloudflare. Route
+llm.mindovermatter.space to HTTP 127.0.0.1:8787, NOT LM Studio port 1234.
+Close the temporary sharing window. Run Start-Permanent-Tunnel.cmd, enter
+the public hostname, and paste only the Cloudflare connector's tunnel token
+at its hidden prompt. The token is not saved. The permanent hostname mode
+supports streamed API replies and a ten-minute total API request limit.
+Only the PRIVATE ACCESS KEY goes in your apps; never the Cloudflare token.
+
+SUPPORTED API
+-------------
+GET /v1/models and POST /v1/chat/completions. Text-only messages, system
+prompts, and common sampling controls. Shared serial queue and 2048-token
+reply cap. The /api/* polling interface still serves the website chat.
+No embeddings, Responses API, tools, images, audio, or model management.
 
 OPTIONAL ADVANCED CONFIGURATION
 ------------------------------
